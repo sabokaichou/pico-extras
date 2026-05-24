@@ -205,6 +205,9 @@ static struct {
 
     uint32_t a, a_vblank, b1, b2, c, c_vblank;
     uint32_t vsync_bits;
+#if PICO_SCANVIDEO_COMPOSITE_SYNC
+    uint32_t csync_mask;     // ~0u normally, ~(1u<<29) during VSYNC to force HSYNC LOW
+#endif
     uint16_t dma_state_index;
     int32_t timing_scanline;
 } timing_state;
@@ -926,7 +929,11 @@ static inline void top_up_timing_pio_fifo() {
     while (!(video_pio->fstat & (1u << (PICO_SCANVIDEO_TIMING_SM + PIO_FSTAT_TXFULL_LSB)))) {
         DEBUG_PINS_XOR(video_irq, 1);
         DEBUG_PINS_XOR(video_irq, 1);
+#if PICO_SCANVIDEO_COMPOSITE_SYNC
+        pio_sm_put(video_pio, PICO_SCANVIDEO_TIMING_SM, (dma_states[timing_state.dma_state_index] & timing_state.csync_mask) | timing_state.vsync_bits);
+#else
         pio_sm_put(video_pio, PICO_SCANVIDEO_TIMING_SM, dma_states[timing_state.dma_state_index] | timing_state.vsync_bits);
+#endif
         // todo simplify this now we have a1, a2, b, c
         // todo display enable (only goes positive on start of screen)
 
@@ -946,8 +953,14 @@ static inline void top_up_timing_pio_fifo() {
                         setup_dma_states_vblank();
                     } else if (timing_state.timing_scanline == timing_state.v_pulse_start) {
                         timing_state.vsync_bits = timing_state.vsync_bits_pulse;
+#if PICO_SCANVIDEO_COMPOSITE_SYNC
+                        timing_state.csync_mask = ~(1u << 29);  // force HSYNC pin LOW during VSYNC
+#endif
                     } else if (timing_state.timing_scanline == timing_state.v_pulse_end) {
                         timing_state.vsync_bits = timing_state.vsync_bits_no_pulse;
+#if PICO_SCANVIDEO_COMPOSITE_SYNC
+                        timing_state.csync_mask = ~0u;          // normal HSYNC during non-VSYNC
+#endif
                     }
                 }
             }
@@ -1636,6 +1649,9 @@ bool scanvideo_setup_with_timing(const scanvideo_mode_t *mode, const scanvideo_t
     // this is two scanlines in vblank
     setup_dma_states_vblank();
     timing_state.vsync_bits = timing_state.vsync_bits_no_pulse;
+#if PICO_SCANVIDEO_COMPOSITE_SYNC
+    timing_state.csync_mask = ~0u;
+#endif
     scanvideo_set_scanline_repeat_fn(NULL);
     return true;
 }
